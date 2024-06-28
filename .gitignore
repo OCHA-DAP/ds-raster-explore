@@ -1,0 +1,6 @@
+.env
+scratch/*
+*/temp/*
+venv/*
+data/*
+.DS_Store
