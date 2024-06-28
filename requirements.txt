@@ -16,3 +16,5 @@ python-dotenv
 matplotlib
 dask[distributed]
 adlfs
+cfgrib
+scipy

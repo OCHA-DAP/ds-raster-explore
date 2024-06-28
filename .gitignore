@@ -4,3 +4,4 @@ scratch/*
 venv/*
 data/*
 .DS_Store
+*.zarr/*
