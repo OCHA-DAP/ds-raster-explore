@@ -1,0 +1,113 @@
+---
+title: "Global COGS"
+format: html
+editor: visual
+---
+
+## Intro
+
+```{r}
+box::use(blob = ../R/utils)
+box::use(AzureStor)
+box::use(dplyr[...])
+box::use(lubridate[...])
+box::use(stringr[...])
+box::use(terra[...])
+
+Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
+Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
+
+extract_date <- function(x){
+    as_date(str_extract(x,"\\d{4}-\\d{2}-\\d{2}"))
+}
+```
+
+```{r}
+pc <- blob$load_proj_contatiners()
+
+az_prefix <- "/vsiaz/global/"
+aws_cog_dir = "raster/cogs"
+mars_cog_dir = "mars/processed"
+
+
+l_contents_aws <- AzureStor$list_blobs(
+    container = pc$GLOBAL_CONT,
+    prefix = paste0(aws_cog_dir,"/202407-ECMWF")
+    )
+
+l_contents_mars <-  AzureStor$list_blobs(
+    container = pc$GLOBAL_CONT,
+    dir = mars_cog_dir
+    )
+
+l_contents_mars <- l_contents_mars |> 
+    mutate(
+        date= extract_date(name),
+        virt_path = paste0(az_prefix,name)
+    ) 
+
+# let just a random mars pub date collection to compare to the AWS
+mars_urls <- l_contents_mars |> 
+    filter(
+        date == "2022-07-01"
+    ) |> 
+    pull(virt_path)
+
+aws_url <-  paste0(az_prefix, l_contents_aws$name)
+r_aws <- rast(aws_url)
+r_mars <- rast(mars_urls)
+
+
+# adjust r_mars names so they match r_aws for easier comparison
+bnames_modified_mars <- 
+    str_remove_all(
+    basename(sources(r_mars)),
+    "^seas5_mars_tprate_em_i|lt|\\.tif$"
+    ) |> 
+    str_replace_all("_",".")
+
+names(r_mars) <- bnames_modified_mars
+
+```
+
+look at first mars band and you can see it is a subset (probably afg?)
+```{r}
+plot(r_mars[[1]])
+```
+
+Whereas AWS is global
+
+```{r}
+plot(r_aws[[1]])
+```
+
+Let's crop AWS global for comparison.
+
+They are different months & values (tprate vs mm) so the values should be different, but lets check extents and grid alignments
+
+```{r}
+r_aws_cropped <- crop(r_aws,r_mars)
+
+plot(r_aws_cropped[[1]])
+plot(r_mars[[1]])
+
+```
+
+Errors displayed in chunks below indicate differences in grid
+```{r}
+# if they have same extent you can merge them - but here we can't even after cropping
+rast(
+    list(
+        r_mars[[1]],
+        r_aws_cropped[[1]]
+    )
+)
+#> Error: [rast] extents do not match
+
+
+# even trying to force the same extent doesn't work. 
+# this will often work if they are nearly identical after cropping
+ext(r_aws_cropped[[1]]) <- ext(r_mars[[1]])
+#> Error: [rast] extents do not match
+
+```
