@@ -5,4 +5,8 @@ venv/*
 data/*
 .DS_Store
 
+*.html
+
+notebooks/rsconnect/*
 notebooks/.ipynb_checkpoints/*
+.Rproj.user

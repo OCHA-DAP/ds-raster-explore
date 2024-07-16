@@ -1,18 +1,46 @@
 ---
-title: "Global COGS"
-format: html
+title: Comparison of WIP MARS pipeline to ECMWF-AWS NRT pipeline
+subtitle: Processed Ensemble Mean COGs
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    self-contained: true
+    embed-resoures: true
+    smooth-scroll: true
+execute:
+  include: true
+  echo: true
+  warning: true
+  error: true
+  message: false
+  eval: true
+  results: "asis"
+  out.width: "100%"
+  code-fold: true
 editor: visual
 ---
 
 ## Intro
 
-```{r}
+This document is a comparison of the MARS processed COGS and the AWS processed COGS. 
+
+- ECMWF has been pushing 0.4 degree NRT seasonal forecast gribs to our AWS bucket on the 5th of each month (starting 2024). These gribs are processed into COGS by taking the ensemble mean. 
+- We want to compare the above w/ seasonal forecast ensemble mean COGS from MARS catalogue. These COGS have been previously produced in an adhoc manner for AA projects such as Dry Corridor, Afghanistan, Ethiopia. But here we want to compare with the new **WIP Global MARS Seasonal Forecast Ensemble Mean COG pipeline**
+
+
+Just recently I processed the global AWS grib file into ensemble mean cogs for July 2024 and pushed to our Azure Blob. For convenience, I will compare that to the MARS ensemble mean COGS.
+
+```{r setup}
 box::use(blob = ../R/utils)
 box::use(AzureStor)
 box::use(dplyr[...])
 box::use(lubridate[...])
 box::use(stringr[...])
+box::use(sf[...])
 box::use(terra[...])
+box::use(rnaturalearth[...])
 
 Sys.setenv(AZURE_SAS = Sys.getenv("DSCI_AZ_SAS_DEV"))
 Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
@@ -20,7 +48,32 @@ Sys.setenv(AZURE_STORAGE_ACCOUNT = Sys.getenv("DSCI_AZ_STORAGE_ACCOUNT"))
 extract_date <- function(x){
     as_date(str_extract(x,"\\d{4}-\\d{2}-\\d{2}"))
 }
+
+
+# helper function for aws bucket
+get_formatted_bucket_df <-  function(bucket=Sys.getenv("BUCKET_NAME")){
+    aws.s3::get_bucket_df(bucket,max = 10000) |> 
+        dplyr::as_tibble() |> 
+        dplyr::mutate(
+            date= lubridate::as_date(LastModified)
+        ) |> 
+        tidyr::separate(LastModified,into = c("date","time"), sep = "T") %>% 
+        dplyr::mutate(
+            time= stringr::str_remove(time,"\\.000Z"),
+            time = stringr::str_replace_all(time,":","-"),
+            filename = paste0(date,"_",time,".grib"),
+            date= lubridate::as_date(date),
+            size_mb = as.numeric(Size) * 1e-6
+        )
+}
+
 ```
+
+## Load blobs
+
+- At current time we know that the global COGS produced from MARS GRIBS are in the blob for the year 2000. Therefore we will compare that to the COGS produced from ensemble means of AWS GRIBS from July 2024 to those produced from MARS GRIBS July 2000.
+- **Note** not currently possible to do a direct comparison of the same date COGS as MARS catalogue has long publishing delay [need to find citation](link), whereas we have only recieved the NRT data on our AWS bucket since 2024.
+- As the data was processed slightly different we will just wrangle the MARS derived bands a bit to match the others for the purpose of this doc.
 
 ```{r}
 pc <- blob$load_proj_contatiners()
@@ -33,12 +86,12 @@ mars_cog_dir = "mars/processed"
 l_contents_aws <- AzureStor$list_blobs(
     container = pc$GLOBAL_CONT,
     prefix = paste0(aws_cog_dir,"/202407-ECMWF")
-    )
+)
 
 l_contents_mars <-  AzureStor$list_blobs(
     container = pc$GLOBAL_CONT,
     dir = mars_cog_dir
-    )
+)
 
 l_contents_mars <- l_contents_mars |> 
     mutate(
@@ -49,7 +102,8 @@ l_contents_mars <- l_contents_mars |>
 # let just a random mars pub date collection to compare to the AWS
 mars_urls <- l_contents_mars |> 
     filter(
-        date == "2022-07-01"
+        # data from 2000 is the new global data
+        date == "2000-07-01"
     ) |> 
     pull(virt_path)
 
@@ -61,8 +115,8 @@ r_mars <- rast(mars_urls)
 # adjust r_mars names so they match r_aws for easier comparison
 bnames_modified_mars <- 
     str_remove_all(
-    basename(sources(r_mars)),
-    "^seas5_mars_tprate_em_i|lt|\\.tif$"
+        basename(sources(r_mars)),
+        "^seas5_mars_tprate_em_i|lt|\\.tif$"
     ) |> 
     str_replace_all("_",".")
 
@@ -70,44 +124,154 @@ names(r_mars) <- bnames_modified_mars
 
 ```
 
-look at first mars band and you can see it is a subset (probably afg?)
+## Check Consistency/Alignment
+
+Both `r_mars` and `r_aws` produce the same warning message.
 ```{r}
 plot(r_mars[[1]])
 ```
 
-Whereas AWS is global
 
 ```{r}
 plot(r_aws[[1]])
 ```
 
-Let's crop AWS global for comparison.
-
-They are different months & values (tprate vs mm) so the values should be different, but lets check extents and grid alignments
+If the grids & extents are aligned we should be able to merge/stack them. The call below does produce a warning: `[rast] CRS do not match `. But nonetheless still allows the stacking of bands. 
 
 ```{r}
-r_aws_cropped <- crop(r_aws,r_mars)
-
-plot(r_aws_cropped[[1]])
-plot(r_mars[[1]])
-
-```
-
-Errors displayed in chunks below indicate differences in grid
-```{r}
-# if they have same extent you can merge them - but here we can't even after cropping
 rast(
     list(
         r_mars[[1]],
-        r_aws_cropped[[1]]
+        r_aws[[1]]
     )
 )
-#> Error: [rast] extents do not match
-
-
-# even trying to force the same extent doesn't work. 
-# this will often work if they are nearly identical after cropping
-ext(r_aws_cropped[[1]]) <- ext(r_mars[[1]])
-#> Error: [rast] extents do not match
 
 ```
+
+## CRS exploration
+
+It looks like the `r_aws` `CRS` is "imported from GRIB file" and not  independently set, whereas the MARS one has actually been set.
+```{r}
+st_crs(r_aws[[1]])
+```
+
+```{r}
+st_crs(r_mars[[1]])
+```
+
+
+## Adjusting AWS derived COG CRS
+
+Two ways we can adjust the CRS of the AWS COG so it matches MARS COG
+1. we can `project` - this would be used if the CRS was in fact different and we wanted to project to new CRS
+2. we can simply set the CRS - this could be used if the coordinates are in fact correct for WGS84, but for some reason the registered CRS just isn't aligning
+```{r}
+# reproject
+r_aws_proj <- terra::project(r_aws[[1]], crs(r_mars[[1]]))
+```
+
+```{r}
+# set
+r_aws_copy <- deepcopy(r_aws)
+crs(r_aws_copy) <-  crs(r_mars)
+```
+
+
+- Merge bands from re-projected w/ get the `Error: [rast] extents do not match` do not match Error. This error combined w/ the previous warning
+indicates that the grids were actually aligned previously, and this re-projections incorrectly changed the coordinates of the `r_aws`
+```{r}
+#| error: true
+rast(
+    list(
+        r_mars[[1]],
+        r_aws_proj
+    )
+)
+```
+
+This is then further confirmed by the fact that the `r_aws_copy` does not produce the error
+```{r}
+
+rast(
+    list(
+        r_mars[[1]],
+        r_aws_copy[[1]]
+    )
+)
+```
+
+
+Let's crop to a smaller extent (Nicaragua) to get a better look at whats going on:
+
+Hard to tell from just plotting raw values
+```{r}
+gdf_nica <-   ne_countries(country = "nicaragua",returnclass = "sf")
+
+r_mars_cropped <- crop(r_mars[[1]],gdf_nica)
+
+plot(r_mars_cropped)
+plot(r_aws_proj_cropped)
+```
+
+
+Therefore let's plot the pixel centroids
+
+### Raw AWS derived vs MARS
+
+By plotting the pixel centroids we can see that the grid cells of the MARS derived COG are in fact aligned with the original AWS derived COG & properly set CRS AWS derived COG.
+
+```{r}
+r_aws_cropped <- crop(r_aws[[1]],gdf_nica)
+plot(terra::as.points(r_mars_cropped), col = "red")
+plot(terra::as.points(r_aws_cropped), col = "blue",add=TRUE, pch=3)
+```
+
+### CRS reset AWS derived vs MARS
+```{r}
+r_aws_crs_set_cropped <- crop(r_aws_copy[[1]],gdf_nica)
+plot(terra::as.points(r_mars_cropped), col = "red")
+plot(terra::as.points(r_aws_crs_set_cropped), col = "blue",add=TRUE, pch=3)
+```
+
+Just as a final gut check add a random raw ensemble from `GRIB` file to make sure it also lines up. Ensemble 1 is added as green.
+```{r}
+bucket_df <- get_formatted_bucket_df(bucket = Sys.getenv("BUCKET_NAME"))
+bucket_df_filt <- bucket_df %>% 
+    filter(
+        size_mb>12,
+        str_detect(date,"2024-07")
+        )
+
+key <- bucket_df_filt$Key[1]
+filename = bucket_df_filt$filename[1]
+td <- tempdir()
+tf <- file.path(td, filename)
+
+
+aws.s3::save_object(bucket=Sys.getenv("BUCKET_NAME"),object = key, file = tf,overwrite = T)
+r_grib <- rast(tf)[[1]]
+
+# since we are just adding to the plot we dont actually have to crop
+plot(terra::as.points(r_mars_cropped), col = "red")
+plot(terra::as.points(r_aws_cropped), col = "blue",add=TRUE, pch=3)
+plot(terra::as.points(r_grib), col = "green",add=TRUE, pch=6)
+```
+
+
+However, the pixel centroids clearly reveal that the AWS derived COG should NOT be reprojected.
+```{r}
+r_aws_proj_cropped <- crop(r_aws_proj[[1]],gdf_nica)
+plot(terra::as.points(r_mars_cropped), col = "red")
+plot(terra::as.points(r_aws_proj_cropped), col = "blue",add=TRUE, pch=3)
+
+```
+
+
+## Conclusion
+
+- The MARS derived COG and the AWS derived COG are in fact aligned and have the same CRS, but the CRS of the AWS derived COG is not properly set as it is somehow getting
+wrongly imported from the GRIB file.This has not previously been an issue because the AWS CRS was properly set as a post-processing step in the adhoc work,but it would be cleaner to integrate this into pipeline
+- When the AWS NRT Global GRIB -> COG (ensemble mean) pipeline is established it can follow the same CRS setting procedure as the MARS derived COG.
+
+
+
