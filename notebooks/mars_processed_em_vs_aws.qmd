@@ -163,6 +163,7 @@ st_crs(r_mars[[1]])
 ## Adjusting AWS derived COG CRS
 
 Two ways we can adjust the CRS of the AWS COG so it matches MARS COG
+
 1. we can `project` - this would be used if the CRS was in fact different and we wanted to project to new CRS
 2. we can simply set the CRS - this could be used if the coordinates are in fact correct for WGS84, but for some reason the registered CRS just isn't aligning
 ```{r}
@@ -177,7 +178,7 @@ crs(r_aws_copy) <-  crs(r_mars)
 ```
 
 
-- Merge bands from re-projected w/ get the `Error: [rast] extents do not match` do not match Error. This error combined w/ the previous warning
+When trying to merge bands of reprojected AWS derived w/ MARS-derived, we get: `Error: [rast] extents do not match`. This error combined w/ the previous warning
 indicates that the grids were actually aligned previously, and this re-projections incorrectly changed the coordinates of the `r_aws`
 ```{r}
 #| error: true
@@ -210,7 +211,11 @@ gdf_nica <-   ne_countries(country = "nicaragua",returnclass = "sf")
 r_mars_cropped <- crop(r_mars[[1]],gdf_nica)
 
 plot(r_mars_cropped)
-plot(r_aws_proj_cropped)
+```
+
+```{r}
+r_aws_cropped <- crop(r_aws[[1]],gdf_nica)
+plot(r_aws_cropped)
 ```
 
 
@@ -221,7 +226,6 @@ Therefore let's plot the pixel centroids
 By plotting the pixel centroids we can see that the grid cells of the MARS derived COG are in fact aligned with the original AWS derived COG & properly set CRS AWS derived COG.
 
 ```{r}
-r_aws_cropped <- crop(r_aws[[1]],gdf_nica)
 plot(terra::as.points(r_mars_cropped), col = "red")
 plot(terra::as.points(r_aws_cropped), col = "blue",add=TRUE, pch=3)
 ```
