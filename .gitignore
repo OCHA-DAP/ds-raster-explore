@@ -4,9 +4,13 @@ scratch/*
 venv/*
 data/*
 .DS_Store
+*.zarr/*
 
+# some R stuff
 *.html
-
 notebooks/rsconnect/*
 notebooks/.ipynb_checkpoints/*
 .Rproj.user
+
+
+
